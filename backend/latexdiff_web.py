@@ -5,7 +5,7 @@ script_path = os.path.dirname(os.path.realpath(__file__))
 
 DEBUG = (__name__ == '__main__')
 TIMEOUT_LIMIT = 600.0
-REDIR_ROOT = os.environ.get('REDIR_ROOT', None).lower() in ['true', '1', 'yes', 'y']
+REDIR_ROOT = str(os.environ.get('REDIR_ROOT', '')).lower() in ['true', '1', 'yes', 'y']
 
 from flask import Flask, request, redirect, jsonify, send_from_directory
 from flask_cors import CORS, cross_origin
@@ -102,7 +102,8 @@ def do_latex_diff(old_proj_zip: FileStorage, new_proj_zip: FileStorage, config: 
                 timeout=timeout)
             docker_output = proc.stdout.decode(errors="ignore")
         except subprocess.TimeoutExpired as e:
-            docker_output = e.stdout.decode(errors="ignore")
+            timeout_stdout = e.stdout or getattr(e, 'output', b'') or b''
+            docker_output = timeout_stdout.decode(errors="ignore")
         finally:
             subprocess.run(f"docker stop -t 5 {container_name}".split(' '), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         diff_pdf = None
@@ -111,8 +112,13 @@ def do_latex_diff(old_proj_zip: FileStorage, new_proj_zip: FileStorage, config: 
             diff_pdf = os.path.join(tempdir, "diff.pdf")
             diff_pdf = file2b64(diff_pdf)
         if download_diff_proj:
-            diff_proj = shutil.make_archive(os.path.join(tempdir, "diff_proj"), 'tar', os.path.join(tempdir, "git-latexdiff"), "new")
-            diff_proj = file2b64(diff_proj)
+            diff_root = os.path.join(tempdir, "git-latexdiff")
+            diff_new_path = os.path.join(diff_root, "new")
+            if os.path.isdir(diff_new_path):
+                diff_proj = shutil.make_archive(os.path.join(tempdir, "diff_proj"), 'tar', diff_root, "new")
+                diff_proj = file2b64(diff_proj)
+            else:
+                diff_proj = None
         else:
             diff_proj = None
         return {"diff_pdf": diff_pdf, "diff_proj": diff_proj, "docker_output": docker_output, "docker_cmd": cmd_str}
